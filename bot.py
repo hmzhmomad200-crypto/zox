@@ -27,12 +27,28 @@ log = logging.getLogger(__name__)
 # ══════════════════════════════════════
 BOT_TOKEN    = os.getenv("BOT_TOKEN",    "ضع_توكن_البوت_هنا")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "your_bot")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "ضع_مفتاح_GROQ_هنا")
+GROQ_KEYS = [
+    "key_1",
+    "key_2",
+    "key_3"
+]
 ADMINS       = [int(x) for x in os.getenv("ADMINS", "123456789").split(",") if x.strip()]
 
 TELEGRAM_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
 
+current_key = 0
+
+def get_key():
+    global current_key
+
+    key = GROQ_KEYS[current_key]
+
+    current_key = (
+        current_key + 1
+    ) % len(GROQ_KEYS)
+
+    return key
 # ══════════════════════════════════════
 #  إعدادات ثابتة
 # ══════════════════════════════════════
@@ -220,7 +236,7 @@ def set_required_channel(channel):
 # ══════════════════════════════════════
 def ask_groq(messages):
     headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Authorization": f"Bearer {get_key()}",
         "Content-Type" : "application/json"
     }
     data = {
@@ -497,20 +513,10 @@ def handle_callback(callback):
     answer_callback(cb_id)
 
     if data == "stats_me":
-
-        user_data = user_memory.get(uid, {})
-
-        text = (
-            "📊 *إحصائياتك*\n\n"
-            f"🧠 الرسائل المحفوظة: `{len(user_data.get('history', [])) - 1}`\n"
-            f"📨 عدد رسائلك: `{user_data.get('msg_count', 0)}`\n"
-            f"📅 تاريخ الانضمام: `{user_data.get('joined_at', '—')[:10]}`"
-        )
-
         edit_message(
             chat_id,
             message_id,
-            text,
+            build_stats_text(uid),
             back_button()
         )
         return
