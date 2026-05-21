@@ -12,12 +12,13 @@ from keyboards import main_menu, back_button, admin_menu, channel_menu, subscrip
 # ══════════════════════════════════════
 #  إعداد السجلات
 # ══════════════════════════════════════
+import sys
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.FileHandler("bot.log", encoding="utf-8"),
-        logging.StreamHandler()
+        logging.StreamHandler(sys.stdout)
     ]
 )
 log = logging.getLogger(__name__)
