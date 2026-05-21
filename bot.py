@@ -48,13 +48,20 @@ SYSTEM_PROMPT = """
 MAX_HISTORY   = 20
 RATE_LIMIT    = 2
 MAX_FILE_SIZE = 5 * 1024 * 1024
-MEMORY_FILE   = "user_memory.json"
-STATS_FILE    = "stats.json"
-CHATS_FILE    = "bot_chats.json"
-BANNED_FILE   = "banned_users.json"
-CHANNEL_FILE  = "required_channel.json"
-SUPPORTED_EXT = ('.txt', '.py', '.js', '.json', '.html',
-                 '.css', '.md', '.xml', '.csv')
+
+DATA_DIR = "data"
+os.makedirs(DATA_DIR, exist_ok=True)
+
+MEMORY_FILE   = f"{DATA_DIR}/user_memory.json"
+STATS_FILE    = f"{DATA_DIR}/stats.json"
+CHATS_FILE    = f"{DATA_DIR}/bot_chats.json"
+BANNED_FILE   = f"{DATA_DIR}/banned_users.json"
+CHANNEL_FILE  = f"{DATA_DIR}/required_channel.json"
+
+SUPPORTED_EXT = (
+    '.txt', '.py', '.js', '.json',
+    '.html', '.css', '.md', '.xml', '.csv'
+)
 
 # حالات معلّقة
 pending_broadcast       = {}
@@ -330,11 +337,12 @@ def get_history(chat_id, user_info=None):
             uid_v  = user_info.get("id", "")
             uname_display = f"@{uname}" if uname else "بدون يوزر"
             notif = (
-                f"🆕 *مستخدم جديد دخل البوت!*\n\n"
-                f"👤 الاسم: {name}\n"
-                f"🔗 اليوزر: {uname_display}\n"
-                f"🆔 الآيدي: `{uid_v}`"
-            )
+    f"🆕 *مستخدم جديد دخل البوت!*\n\n"
+    f"👤 الاسم: {name}\n"
+    f"🔗 اليوزر: {uname_display}\n"
+    f"🆔 الآيدي: `{uid_v}`\n"
+    f"👥 عدد المستخدمين: `{stats['total_users']}`"
+)
             for admin_id in ADMINS:
                 send_message(admin_id, notif)
 
@@ -487,6 +495,15 @@ def handle_callback(callback):
     is_admin   = int(uid) in ADMINS
 
     answer_callback(cb_id)
+
+    if data == "stats_me":
+        edit_message(
+            chat_id,
+            message_id,
+            build_stats_text(uid),
+            back_button()
+        )
+        return
 
     # ── زر التحقق من الاشتراك ──
     if data == "check_subscription":
