@@ -7,7 +7,7 @@ import copy
 import logging
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
-from keyboards import main_menu, back_button, admin_menu
+from keyboards import main_menu, back_button, admin_menu, channel_menu, subscription_required_keyboard
 
 # ══════════════════════════════════════
 #  إعداد السجلات
@@ -52,6 +52,7 @@ MEMORY_FILE   = "user_memory.json"
 STATS_FILE    = "stats.json"
 CHATS_FILE    = "bot_chats.json"
 BANNED_FILE   = "banned_users.json"
+CHANNEL_FILE  = "required_channel.json"
 SUPPORTED_EXT = ('.txt', '.py', '.js', '.json', '.html',
                  '.css', '.md', '.xml', '.csv')
 
@@ -61,6 +62,7 @@ pending_group_broadcast = {}
 pending_ban             = {}
 pending_unban           = {}
 pending_clear           = {}
+pending_addchannel      = {}
 
 # ══════════════════════════════════════
 #  حفظ / تحميل JSON
@@ -94,6 +96,10 @@ stats             = load_json(STATS_FILE, {
 bot_chats         = load_json(CHATS_FILE, {})
 banned_users      = set(load_json(BANNED_FILE, []))
 user_last_message = {}
+
+# تحميل إعدادات القناة الإجبارية
+_channel_data    = load_json(CHANNEL_FILE, {"channel": None})
+REQUIRED_CHANNEL = _channel_data.get("channel")  # مثال: "@mychannel"
 
 # ══════════════════════════════════════
 #  دوال تيليجرام
@@ -174,6 +180,33 @@ def get_file(file_id, max_size=MAX_FILE_SIZE):
     except Exception as e:
         return None, f"خطأ في get_file: {e}"
 
+
+# ══════════════════════════════════════
+#  الاشتراك الإجباري
+# ══════════════════════════════════════
+def check_subscription(user_id):
+    """يتحقق إذا المستخدم مشترك في القناة الإجبارية"""
+    if not REQUIRED_CHANNEL:
+        return True
+    try:
+        r = requests.get(
+            f"{TELEGRAM_URL}/getChatMember",
+            params={"chat_id": REQUIRED_CHANNEL, "user_id": user_id},
+            timeout=10
+        )
+        data = r.json()
+        if not data.get("ok"):
+            return True  # لو فشل التحقق، نتجاوز
+        status = data["result"].get("status", "")
+        return status in ("member", "administrator", "creator")
+    except Exception:
+        return True
+
+def set_required_channel(channel):
+    """حفظ القناة الإجبارية"""
+    global REQUIRED_CHANNEL
+    REQUIRED_CHANNEL = channel
+    save_json(CHANNEL_FILE, {"channel": channel})
 
 # ══════════════════════════════════════
 #  دوال Groq
@@ -272,9 +305,14 @@ def process_file(content, name):
         return f"خطأ في قراءة الملف: {e}"
 
 
-def get_history(chat_id):
-    cid = str(chat_id)
-    if cid not in user_memory:
+def get_history(chat_id, user_info=None):
+    """
+    يجلب تاريخ المحادثة.
+    user_info: dict من message["from"] — يُستخدم لإشعار الأدمن بالمستخدم الجديد.
+    """
+    cid    = str(chat_id)
+    is_new = cid not in user_memory
+    if is_new:
         user_memory[cid] = {
             "history"  : [{"role": "system", "content": SYSTEM_PROMPT}],
             "name"     : "",
@@ -284,6 +322,22 @@ def get_history(chat_id):
         }
         stats["total_users"] += 1
         save_json(STATS_FILE, stats)
+
+        # ── إشعار الأدمن بمستخدم جديد ──
+        if user_info:
+            name   = user_info.get("first_name", "") or user_info.get("username", "مجهول")
+            uname  = user_info.get("username", "")
+            uid_v  = user_info.get("id", "")
+            uname_display = f"@{uname}" if uname else "بدون يوزر"
+            notif = (
+                f"🆕 *مستخدم جديد دخل البوت!*\n\n"
+                f"👤 الاسم: {name}\n"
+                f"🔗 اليوزر: {uname_display}\n"
+                f"🆔 الآيدي: `{uid_v}`"
+            )
+            for admin_id in ADMINS:
+                send_message(admin_id, notif)
+
     return user_memory[cid]["history"]
 
 def trim_history(chat_id):
@@ -316,6 +370,7 @@ def build_stats_text(cid=None):
         pass
     groups   = sum(1 for v in bot_chats.values() if v.get("type") in ("group","supergroup"))
     channels = sum(1 for v in bot_chats.values() if v.get("type") == "channel")
+    ch_line  = f"\n📌 قناة إجبارية      : `{REQUIRED_CHANNEL or 'لا توجد'}`"
     lines = [
         "📊 *إحصائيات البوت الكاملة*\n",
         f"👥 إجمالي المستخدمين : `{stats['total_users']}`",
@@ -326,6 +381,7 @@ def build_stats_text(cid=None):
         f"🏘 المجموعات         : `{groups}`",
         f"📣 القنوات           : `{channels}`",
         f"🚫 المحظورون         : `{len(banned_users)}`",
+        ch_line,
         f"🕐 تاريخ التشغيل     : `{started}`",
     ]
     if cid:
@@ -432,6 +488,19 @@ def handle_callback(callback):
 
     answer_callback(cb_id)
 
+    # ── زر التحقق من الاشتراك ──
+    if data == "check_subscription":
+        if check_subscription(int(uid)):
+            edit_message(chat_id, message_id,
+                         "✅ *تم التحقق! أهلاً بك.*\n\nالآن يمكنك استخدام البوت.",
+                         main_menu())
+        else:
+            answer_callback(cb_id, "❌ لم تشترك بعد! اشترك ثم اضغط التحقق.", alert=True)
+        return
+
+    if data == "noop":
+        return
+
     if data == "main_menu":
         edit_message(chat_id, message_id, "🏠 *القائمة الرئيسية*", main_menu())
         return
@@ -442,9 +511,13 @@ def handle_callback(callback):
                      back_button())
         return
 
-    # أزرار الأدمن
+    # أزرار الأدمن — حماية
     if not is_admin and data.startswith("admin"):
         answer_callback(cb_id, "⛔ غير مصرح لك", alert=True)
+        return
+
+    if data == "back_admin":
+        edit_message(chat_id, message_id, "🛠 *لوحة الأدمن*", admin_menu())
         return
 
     if data == "admin_stats":
@@ -477,6 +550,28 @@ def handle_callback(callback):
                      "📣 *أرسل الآن نص الرسالة لجميع المجموعات:*", back_button())
         return
 
+    # ── إدارة القناة الإجبارية ──
+    if data == "admin_channel_menu":
+        edit_message(chat_id, message_id,
+                     "📌 *إدارة الاشتراك الإجباري*",
+                     channel_menu(REQUIRED_CHANNEL))
+        return
+
+    if data == "admin_addchannel_prompt":
+        pending_addchannel[uid] = True
+        edit_message(chat_id, message_id,
+                     "📌 *أرسل يوزرنيم القناة:*\n\nمثال: `@mychannel`\n\n"
+                     "⚠️ تأكد أن البوت أدمن في القناة أولاً!",
+                     back_button())
+        return
+
+    if data == "admin_removechannel":
+        set_required_channel(None)
+        edit_message(chat_id, message_id,
+                     "✅ *تم إلغاء الاشتراك الإجباري بنجاح.*",
+                     admin_menu())
+        return
+
     if data == "admin_ban_prompt":
         pending_ban[uid] = True
         edit_message(chat_id, message_id,
@@ -499,11 +594,11 @@ def handle_callback(callback):
 # ══════════════════════════════════════
 #  أوامر DM
 # ══════════════════════════════════════
-def handle_command(chat_id, command, is_admin, user_name="", username=""):
+def handle_command(chat_id, command, is_admin, user_name="", username="", user_obj=None):
     cid = str(chat_id)
 
     if command.startswith("/start"):
-        get_history(cid)
+        get_history(cid, user_obj)
         user_memory[cid]["name"]     = user_name
         user_memory[cid]["username"] = username
         save_json(MEMORY_FILE, user_memory)
@@ -513,6 +608,9 @@ def handle_command(chat_id, command, is_admin, user_name="", username=""):
                      "أو أرسل صورة/ملف للتحليل.\n\n"
                      "في المجموعات استخدم الأمر /dew",
                      reply_markup=main_menu())
+        # لوحة الأدمن تلقائياً عند /start
+        if is_admin:
+            send_message(chat_id, "🛠 *لوحة الأدمن*", reply_markup=admin_menu())
         return True
 
     if command == "/menu":
@@ -663,6 +761,17 @@ while True:
                     if uid in pending_group_broadcast and pending_group_broadcast.pop(uid):
                         _do_group_broadcast(uid, text)
                         continue
+                    if uid in pending_addchannel and pending_addchannel.pop(uid):
+                        ch = text.strip()
+                        if not ch.startswith("@"):
+                            ch = "@" + ch
+                        set_required_channel(ch)
+                        send_message(uid,
+                                     f"✅ *تم تفعيل الاشتراك الإجباري!*\n\n"
+                                     f"📌 القناة: `{ch}`\n\n"
+                                     f"⚠️ تأكد أن البوت أدمن في القناة.",
+                                     reply_markup=admin_menu())
+                        continue
                     if uid in pending_ban and pending_ban.pop(uid):
                         banned_users.add(text.strip())
                         save_json(BANNED_FILE, list(banned_users))
@@ -683,7 +792,17 @@ while True:
                             send_message(uid, f"❓ المستخدم `{target}` غير موجود")
                         continue
 
-                    if handle_command(chat_id, text, is_admin, user_name, username):
+                    if handle_command(chat_id, text, is_admin, user_name, username, user):
+                        continue
+
+                    # ── تحقق من الاشتراك الإجباري (غير الأدمن فقط) ──
+                    if not is_admin and REQUIRED_CHANNEL and not check_subscription(int(uid)):
+                        send_message(
+                            chat_id,
+                            f"⚠️ *يجب الاشتراك في قناتنا أولاً!*\n\n"
+                            f"اشترك ثم اضغط ✅ تحققت.",
+                            reply_markup=subscription_required_keyboard(REQUIRED_CHANNEL)
+                        )
                         continue
 
                     now  = time.time()
@@ -695,11 +814,20 @@ while True:
 
                     push_user(chat_id, text)
                     send_typing(chat_id)
-                    reply = ask_groq(get_history(chat_id))
+                    reply = ask_groq(get_history(chat_id, user))
                     push_assistant(chat_id, reply)
                     send_message(chat_id, reply)
 
                 elif "photo" in message and not is_group:
+                    # ── تحقق من الاشتراك الإجباري ──
+                    if not is_admin and REQUIRED_CHANNEL and not check_subscription(int(uid)):
+                        send_message(
+                            chat_id,
+                            f"⚠️ *يجب الاشتراك في قناتنا أولاً!*\n\n"
+                            f"اشترك ثم اضغط ✅ تحققت.",
+                            reply_markup=subscription_required_keyboard(REQUIRED_CHANNEL)
+                        )
+                        continue
                     file_content, err = get_file(message["photo"][-1]["file_id"])
                     if err:
                         send_message(chat_id, err)
@@ -708,13 +836,22 @@ while True:
                         push_user(chat_id, caption)
                         send_typing(chat_id)
                         img_b64 = "data:image/jpeg;base64," + base64.b64encode(file_content).decode()
-                        reply = ask_groq_vision(get_history(chat_id), img_b64)
+                        reply = ask_groq_vision(get_history(chat_id, user), img_b64)
                         push_assistant(chat_id, reply)
                         stats["total_images"] = stats.get("total_images", 0) + 1
                         save_json(STATS_FILE, stats)
                         send_message(chat_id, reply)
 
                 elif "document" in message and not is_group:
+                    # ── تحقق من الاشتراك الإجباري ──
+                    if not is_admin and REQUIRED_CHANNEL and not check_subscription(int(uid)):
+                        send_message(
+                            chat_id,
+                            f"⚠️ *يجب الاشتراك في قناتنا أولاً!*\n\n"
+                            f"اشترك ثم اضغط ✅ تحققت.",
+                            reply_markup=subscription_required_keyboard(REQUIRED_CHANNEL)
+                        )
+                        continue
                     doc       = message["document"]
                     file_name = doc.get("file_name", "unknown")
                     file_content, err = get_file(doc["file_id"])
@@ -724,7 +861,7 @@ while True:
                         send_typing(chat_id)
                         file_text = process_file(file_content, file_name)
                         push_user(chat_id, f"ملف: {file_name}\n\n{file_text[:3000]}")
-                        reply = ask_groq(get_history(chat_id))
+                        reply = ask_groq(get_history(chat_id, user))
                         push_assistant(chat_id, reply)
                         stats["total_files"] = stats.get("total_files", 0) + 1
                         save_json(STATS_FILE, stats)
@@ -740,3 +877,5 @@ while True:
     except Exception as e:
         log.error(f"connection error: {e}")
         time.sleep(5)
+PYEOF
+echo "bot.py done"
