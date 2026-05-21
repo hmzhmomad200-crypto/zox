@@ -241,7 +241,8 @@ def ask_groq_fix(file_text, file_name):
         }
         try:
             r = requests.post(GROQ_URL, headers=headers, json=data, timeout=90)
-            if r.status_code == 429:
+            if r.status_code in (429, 401):
+                log.warning(f"Groq fix key #{_groq_index+1} returned {r.status_code}, switching...")
                 _next_groq_key()
                 time.sleep(0.5)
                 continue
@@ -250,7 +251,8 @@ def ask_groq_fix(file_text, file_name):
         except requests.exceptions.Timeout:
             return None
         except Exception:
-            return None
+            _next_groq_key()
+            continue
     return None
 
 
@@ -377,7 +379,8 @@ def ask_groq(messages):
         }
         try:
             r = requests.post(GROQ_URL, headers=headers, json=data, timeout=60)
-            if r.status_code == 429:
+            if r.status_code in (429, 401):
+                log.warning(f"Groq key #{_groq_index+1} returned {r.status_code}, switching...")
                 _next_groq_key()
                 time.sleep(0.5)
                 continue
@@ -386,7 +389,8 @@ def ask_groq(messages):
         except requests.exceptions.Timeout:
             return "⏱ انتهت مهلة الاتصال، حاول مرة أخرى"
         except requests.exceptions.HTTPError:
-            return f"❌ خطأ HTTP {r.status_code}"
+            _next_groq_key()
+            continue
         except requests.exceptions.RequestException as e:
             return f"❌ خطأ في الاتصال: {e}"
         except (KeyError, IndexError):
@@ -416,7 +420,8 @@ def ask_groq_vision(messages, image_b64):
         }
         try:
             r = requests.post(GROQ_URL, headers=headers, json=data, timeout=90)
-            if r.status_code == 429:
+            if r.status_code in (429, 401):
+                log.warning(f"Groq vision key #{_groq_index+1} returned {r.status_code}, switching...")
                 _next_groq_key()
                 time.sleep(0.5)
                 continue
@@ -427,7 +432,8 @@ def ask_groq_vision(messages, image_b64):
         except requests.exceptions.Timeout:
             return "⏱ انتهت مهلة الاتصال عند معالجة الصورة"
         except requests.exceptions.HTTPError:
-            return f"❌ خطأ HTTP {r.status_code}"
+            _next_groq_key()
+            continue
         except Exception as e:
             return f"❌ خطأ في معالجة الصورة: {e}"
     return "⏳ كل المفاتيح مشغولة حالياً، حاول بعد لحظة"
