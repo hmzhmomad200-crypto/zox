@@ -25,10 +25,16 @@ log = logging.getLogger(__name__)
 # ══════════════════════════════════════
 #  متغيرات البيئة
 # ══════════════════════════════════════
-BOT_TOKEN    = os.getenv("BOT_TOKEN",    "ضع_توكن_البوت_هنا")
-BOT_USERNAME = os.getenv("BOT_USERNAME", "your_bot")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "ضع_مفتاح_GROQ_هنا")
-ADMINS       = [int(x) for x in os.getenv("ADMINS", "123456789").split(",") if x.strip()]
+BOT_TOKEN    = os.getenv("BOT_TOKEN",    "").strip()
+BOT_USERNAME = os.getenv("BOT_USERNAME", "your_bot").strip()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+ADMINS       = [int(x) for x in os.getenv("ADMINS", "").split(",") if x.strip().isdigit()]
+
+# تحقق من المفاتيح الأساسية عند التشغيل
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN غير موجود في متغيرات البيئة!")
+if not GROQ_API_KEY:
+    raise ValueError("GROQ_API_KEY غير موجود في متغيرات البيئة!")
 
 TELEGRAM_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
@@ -36,14 +42,14 @@ GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
 # ══════════════════════════════════════
 #  إعدادات ثابتة
 # ══════════════════════════════════════
-SYSTEM_PROMPT = """
-أنت مساعد متخصص بالكامل في Python.
-- تجاوب فقط عن Python.
-- إذا كان السؤال خارج Python قل: (أنا متخصص في Python فقط)
-- ساعد في: Flask, Django, APIs, Bots, Automation, Debugging, Web Scraping, OOP
-- أصلح الأكواد واشرح الأخطاء.
-- استخدم العربية دائمًا.
-"""
+SYSTEM_PROMPT = (
+    "أنت مساعد متخصص بالكامل في Python.\n"
+    "- تجاوب فقط عن Python.\n"
+    "- إذا كان السؤال خارج Python قل: (أنا متخصص في Python فقط)\n"
+    "- ساعد في: Flask, Django, APIs, Bots, Automation, Debugging, Web Scraping, OOP\n"
+    "- أصلح الأكواد واشرح الأخطاء.\n"
+    "- استخدم العربية دائمًا."
+)
 
 MAX_HISTORY   = 20
 RATE_LIMIT    = 2
@@ -52,16 +58,13 @@ MAX_FILE_SIZE = 5 * 1024 * 1024
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
-MEMORY_FILE   = f"{DATA_DIR}/user_memory.json"
-STATS_FILE    = f"{DATA_DIR}/stats.json"
-CHATS_FILE    = f"{DATA_DIR}/bot_chats.json"
-BANNED_FILE   = f"{DATA_DIR}/banned_users.json"
-CHANNEL_FILE  = f"{DATA_DIR}/required_channel.json"
+MEMORY_FILE  = f"{DATA_DIR}/user_memory.json"
+STATS_FILE   = f"{DATA_DIR}/stats.json"
+CHATS_FILE   = f"{DATA_DIR}/bot_chats.json"
+BANNED_FILE  = f"{DATA_DIR}/banned_users.json"
+CHANNEL_FILE = f"{DATA_DIR}/required_channel.json"
 
-SUPPORTED_EXT = (
-    '.txt', '.py', '.js', '.json',
-    '.html', '.css', '.md', '.xml', '.csv'
-)
+SUPPORTED_EXT = ('.txt', '.py', '.js', '.json', '.html', '.css', '.md', '.xml', '.csv')
 
 # حالات معلّقة
 pending_broadcast       = {}
@@ -100,35 +103,31 @@ stats             = load_json(STATS_FILE, {
     "dew_used"      : 0,
     "started_at"    : datetime.now(timezone.utc).isoformat()
 })
-bot_chats         = load_json(CHATS_FILE, {})
-banned_users      = set(load_json(BANNED_FILE, []))
+bot_chats    = load_json(CHATS_FILE, {})
+banned_users = set(load_json(BANNED_FILE, []))
 user_last_message = {}
 
-# تحميل إعدادات القناة الإجبارية
 _channel_data    = load_json(CHANNEL_FILE, {"channel": None})
-REQUIRED_CHANNEL = _channel_data.get("channel")  # مثال: "@mychannel"
+REQUIRED_CHANNEL = _channel_data.get("channel")
 
 # ══════════════════════════════════════
 #  دوال تيليجرام
 # ══════════════════════════════════════
-def send_message(chat_id, text, reply_markup=None,
-                 parse_mode="Markdown", reply_to=None):
+def send_message(chat_id, text, reply_markup=None, parse_mode="Markdown", reply_to=None):
     MAX_LEN = 4096
     chat_id = str(chat_id)
     chunks  = [text[i:i + MAX_LEN] for i in range(0, len(text), MAX_LEN)]
     for idx, chunk in enumerate(chunks):
         payload = {"chat_id": chat_id, "text": chunk, "parse_mode": parse_mode}
         if reply_markup and idx == len(chunks) - 1:
-            payload["reply_markup"] = reply_markup
+            payload["reply_markup"] = reply_markup  # FIX: dict مباشرة مع json=
         if reply_to:
             payload["reply_to_message_id"] = reply_to
         try:
-            r = requests.post(f"{TELEGRAM_URL}/sendMessage",
-                              json=payload, timeout=15)
+            r = requests.post(f"{TELEGRAM_URL}/sendMessage", json=payload, timeout=15)
             if not r.json().get("ok"):
                 payload.pop("parse_mode", None)
-                requests.post(f"{TELEGRAM_URL}/sendMessage",
-                              json=payload, timeout=15)
+                requests.post(f"{TELEGRAM_URL}/sendMessage", json=payload, timeout=15)
         except Exception as e:
             log.error(f"send_message({chat_id}): {e}")
 
@@ -141,29 +140,31 @@ def edit_message(chat_id, message_id, text, reply_markup=None):
         "parse_mode": "Markdown"
     }
     if reply_markup:
-        payload["reply_markup"] = reply_markup
+        payload["reply_markup"] = reply_markup  # FIX: dict مباشرة مع json=
     try:
-        requests.post(f"{TELEGRAM_URL}/editMessageText",
-                      json=payload, timeout=15)
+        requests.post(f"{TELEGRAM_URL}/editMessageText", json=payload, timeout=15)
     except Exception as e:
         log.error(f"edit_message: {e}")
 
 
 def answer_callback(cb_id, text="", alert=False):
     try:
-        requests.post(f"{TELEGRAM_URL}/answerCallbackQuery",
-                      json={"callback_query_id": cb_id,
-                            "text": text, "show_alert": alert},
-                      timeout=10)
+        requests.post(
+            f"{TELEGRAM_URL}/answerCallbackQuery",
+            json={"callback_query_id": cb_id, "text": text, "show_alert": alert},
+            timeout=10
+        )
     except Exception:
         pass
 
 
 def send_typing(chat_id):
     try:
-        requests.post(f"{TELEGRAM_URL}/sendChatAction",
-                      json={"chat_id": str(chat_id), "action": "typing"},
-                      timeout=10)
+        requests.post(
+            f"{TELEGRAM_URL}/sendChatAction",
+            json={"chat_id": str(chat_id), "action": "typing"},
+            timeout=10
+        )
     except Exception:
         pass
 
@@ -171,7 +172,9 @@ def send_typing(chat_id):
 def get_file(file_id, max_size=MAX_FILE_SIZE):
     try:
         info = requests.get(
-            f"{TELEGRAM_URL}/getFile?file_id={file_id}", timeout=10
+            f"{TELEGRAM_URL}/getFile",
+            params={"file_id": file_id},
+            timeout=10
         ).json()
         if not info.get("ok"):
             return None, "فشل الحصول على معلومات الملف"
@@ -179,11 +182,10 @@ def get_file(file_id, max_size=MAX_FILE_SIZE):
         file_size = result.get("file_size", 0)
         if file_size > max_size:
             mb = max_size // 1024 // 1024
-            return None, f"❌ الملف كبير جداً ({file_size // 1024} KB). الحد الأقصى {mb} MB"
+            return None, f"الملف كبير جداً ({file_size // 1024} KB). الحد الأقصى {mb} MB"
         url  = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{result['file_path']}"
         resp = requests.get(url, timeout=30)
-        return (resp.content, None) if resp.status_code == 200 \
-               else (None, "فشل تحميل الملف من تيليجرام")
+        return (resp.content, None) if resp.status_code == 200 else (None, "فشل تحميل الملف من تيليجرام")
     except Exception as e:
         return None, f"خطأ في get_file: {e}"
 
@@ -192,28 +194,28 @@ def get_file(file_id, max_size=MAX_FILE_SIZE):
 #  الاشتراك الإجباري
 # ══════════════════════════════════════
 def check_subscription(user_id):
-    """يتحقق إذا المستخدم مشترك في القناة الإجبارية"""
     if not REQUIRED_CHANNEL:
         return True
     try:
-        r = requests.get(
+        r    = requests.get(
             f"{TELEGRAM_URL}/getChatMember",
             params={"chat_id": REQUIRED_CHANNEL, "user_id": user_id},
             timeout=10
         )
         data = r.json()
         if not data.get("ok"):
-            return True  # لو فشل التحقق، نتجاوز
+            return True
         status = data["result"].get("status", "")
         return status in ("member", "administrator", "creator")
     except Exception:
         return True
 
+
 def set_required_channel(channel):
-    """حفظ القناة الإجبارية"""
     global REQUIRED_CHANNEL
     REQUIRED_CHANNEL = channel
     save_json(CHANNEL_FILE, {"channel": channel})
+
 
 # ══════════════════════════════════════
 #  دوال Groq
@@ -234,15 +236,15 @@ def ask_groq(messages):
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"]
     except requests.exceptions.Timeout:
-        return "⏱ انتهت مهلة الاتصال، حاول مرة أخرى"
+        return "انتهت مهلة الاتصال، حاول مرة أخرى"
     except requests.exceptions.HTTPError:
         if r.status_code == 429:
-            return "⏳ الخادم مشغول حالياً، حاول بعد لحظة"
-        return f"❌ خطأ HTTP {r.status_code}"
+            return "الخادم مشغول حالياً، حاول بعد لحظة"
+        return f"خطأ HTTP {r.status_code}"
     except requests.exceptions.RequestException as e:
-        return f"❌ خطأ في الاتصال: {e}"
+        return f"خطأ في الاتصال: {e}"
     except (KeyError, IndexError):
-        return "❌ استجابة غير صحيحة من الخادم"
+        return "استجابة غير صحيحة من الخادم"
 
 
 def ask_groq_vision(messages, image_b64):
@@ -250,8 +252,10 @@ def ask_groq_vision(messages, image_b64):
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type" : "application/json"
     }
-    msgs = copy.deepcopy(messages)
-    last_text = msgs[-1]["content"]
+    msgs      = copy.deepcopy(messages)
+    last_item = msgs[-1]["content"]
+    # FIX: تأكد أن المحتوى string قبل إرساله
+    last_text = last_item if isinstance(last_item, str) else ""
     msgs[-1]["content"] = [
         {"type": "text",      "text": last_text},
         {"type": "image_url", "image_url": {"url": image_b64}}
@@ -267,15 +271,15 @@ def ask_groq_vision(messages, image_b64):
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"]
     except requests.exceptions.Timeout:
-        return "⏱ انتهت مهلة الاتصال عند معالجة الصورة"
+        return "انتهت مهلة الاتصال عند معالجة الصورة"
     except requests.exceptions.HTTPError:
         if r.status_code == 400:
-            return "❌ خطأ في الصورة: تأكد أن الصورة واضحة وصيغتها JPEG/PNG"
+            return "خطأ في الصورة: تأكد أن الصورة واضحة وصيغتها JPEG/PNG"
         if r.status_code == 429:
-            return "⏳ الخادم مشغول، حاول بعد لحظة"
-        return f"❌ خطأ HTTP {r.status_code}"
+            return "الخادم مشغول، حاول بعد لحظة"
+        return f"خطأ HTTP {r.status_code}"
     except Exception as e:
-        return f"❌ خطأ في معالجة الصورة: {e}"
+        return f"خطأ في معالجة الصورة: {e}"
 
 
 # ══════════════════════════════════════
@@ -291,11 +295,13 @@ def register_chat(chat):
         }
         save_json(CHATS_FILE, bot_chats)
 
+
 def unregister_chat(chat_id):
     cid = str(chat_id)
     if cid in bot_chats:
         del bot_chats[cid]
         save_json(CHATS_FILE, bot_chats)
+
 
 # ══════════════════════════════════════
 #  إدارة ذاكرة المستخدم
@@ -313,10 +319,6 @@ def process_file(content, name):
 
 
 def get_history(chat_id, user_info=None):
-    """
-    يجلب تاريخ المحادثة.
-    user_info: dict من message["from"] — يُستخدم لإشعار الأدمن بالمستخدم الجديد.
-    """
     cid    = str(chat_id)
     is_new = cid not in user_memory
     if is_new:
@@ -330,39 +332,44 @@ def get_history(chat_id, user_info=None):
         stats["total_users"] += 1
         save_json(STATS_FILE, stats)
 
-        # ── إشعار الأدمن بمستخدم جديد ──
         if user_info:
-            name   = user_info.get("first_name", "") or user_info.get("username", "مجهول")
-            uname  = user_info.get("username", "")
-            uid_v  = user_info.get("id", "")
+            name          = user_info.get("first_name", "") or user_info.get("username", "مجهول")
+            uname         = user_info.get("username", "")
+            uid_v         = user_info.get("id", "")
             uname_display = f"@{uname}" if uname else "بدون يوزر"
             notif = (
-    f"🆕 *مستخدم جديد دخل البوت!*\n\n"
-    f"👤 الاسم: {name}\n"
-    f"🔗 اليوزر: {uname_display}\n"
-    f"🆔 الآيدي: `{uid_v}`\n"
-    f"👥 عدد المستخدمين: `{stats['total_users']}`"
-)
+                f"*مستخدم جديد دخل البوت!*\n\n"
+                f"الاسم: {name}\n"
+                f"اليوزر: {uname_display}\n"
+                f"الآيدي: `{uid_v}`\n"
+                f"عدد المستخدمين: `{stats['total_users']}`"
+            )
             for admin_id in ADMINS:
                 send_message(admin_id, notif)
 
     return user_memory[cid]["history"]
 
+
 def trim_history(chat_id):
     cid = str(chat_id)
-    if cid not in user_memory:
+    if cid not in user_memory:  # FIX: تحقق قبل الوصول
         return
-    h   = user_memory[cid]["history"]
+    h = user_memory[cid]["history"]
     if len(h) > MAX_HISTORY:
         user_memory[cid]["history"] = [h[0]] + h[-(MAX_HISTORY - 1):]
 
+
 def push_user(chat_id, content):
-    get_history(chat_id).append({"role": "user", "content": content})
-    trim_history(chat_id)
+    cid = str(chat_id)
+    if cid not in user_memory:  # FIX: تأكد من وجود المستخدم
+        get_history(cid)
+    user_memory[cid]["history"].append({"role": "user", "content": content})
+    trim_history(cid)
+
 
 def push_assistant(chat_id, content):
     cid = str(chat_id)
-    if cid not in user_memory:
+    if cid not in user_memory:  # FIX: تأكد من وجود المستخدم
         get_history(cid)
     user_memory[cid]["history"].append({"role": "assistant", "content": content})
     user_memory[cid]["msg_count"] = user_memory[cid].get("msg_count", 0) + 1
@@ -370,54 +377,58 @@ def push_assistant(chat_id, content):
     save_json(STATS_FILE,  stats)
     save_json(MEMORY_FILE, user_memory)
 
+
 # ══════════════════════════════════════
 #  نصوص الأدمن
 # ══════════════════════════════════════
 def build_stats_text(cid=None):
     started = stats.get("started_at", "—")
     try:
-        dt = datetime.fromisoformat(started)
+        dt      = datetime.fromisoformat(started)
         started = dt.strftime("%Y-%m-%d %H:%M UTC")
     except Exception:
         pass
-    groups   = sum(1 for v in bot_chats.values() if v.get("type") in ("group","supergroup"))
+    groups   = sum(1 for v in bot_chats.values() if v.get("type") in ("group", "supergroup"))
     channels = sum(1 for v in bot_chats.values() if v.get("type") == "channel")
-    ch_line  = f"\n📌 قناة إجبارية      : `{REQUIRED_CHANNEL or 'لا توجد'}`"
+    ch_line  = f"\nقناة إجبارية: `{REQUIRED_CHANNEL or 'لا توجد'}`"
     lines = [
-        "📊 *إحصائيات البوت الكاملة*\n",
-        f"👥 إجمالي المستخدمين : `{stats['total_users']}`",
-        f"💬 إجمالي الرسائل    : `{stats['total_messages']}`",
-        f"🖼 صور محللة         : `{stats.get('total_images', 0)}`",
-        f"📂 ملفات معالجة      : `{stats.get('total_files', 0)}`",
-        f"🔧 استخدامات /dew    : `{stats.get('dew_used', 0)}`",
-        f"🏘 المجموعات         : `{groups}`",
-        f"📣 القنوات           : `{channels}`",
-        f"🚫 المحظورون         : `{len(banned_users)}`",
+        "*إحصائيات البوت الكاملة*\n",
+        f"إجمالي المستخدمين : `{stats['total_users']}`",
+        f"إجمالي الرسائل    : `{stats['total_messages']}`",
+        f"صور محللة         : `{stats.get('total_images', 0)}`",
+        f"ملفات معالجة      : `{stats.get('total_files', 0)}`",
+        f"استخدامات /dew    : `{stats.get('dew_used', 0)}`",
+        f"المجموعات         : `{groups}`",
+        f"القنوات           : `{channels}`",
+        f"المحظورون         : `{len(banned_users)}`",
         ch_line,
-        f"🕐 تاريخ التشغيل     : `{started}`",
+        f"تاريخ التشغيل     : `{started}`",
     ]
     if cid:
-        uid_data = user_memory.get(str(cid), {})
+        uid_data      = user_memory.get(str(cid), {})
+        history_count = max(0, len(uid_data.get("history", [])) - 1)  # FIX: لا يرجع سالب
         lines += [
             "",
-            "👤 *بياناتك الشخصية*",
-            f"🧠 رسائلك المحفوظة : `{max(0, len(uid_data.get('history', [])) - 1)}`",
-            f"📨 مجموع رسائلك    : `{uid_data.get('msg_count', 0)}`",
-            f"📅 انضممت          : `{uid_data.get('joined_at', '—')[:10]}`",
+            "*بياناتك الشخصية*",
+            f"رسائلك المحفوظة : `{history_count}`",
+            f"مجموع رسائلك    : `{uid_data.get('msg_count', 0)}`",
+            f"انضممت          : `{uid_data.get('joined_at', '—')[:10]}`",
         ]
     return "\n".join(lines)
 
+
 def build_chats_text():
     if not bot_chats:
-        return "🏘 *الجروبات والقنوات*\n\nلا يوجد مجموعات أو قنوات مسجلة."
-    lines = ["🏘 *الجروبات والقنوات:*\n"]
+        return "*الجروبات والقنوات*\n\nلا يوجد مجموعات أو قنوات مسجلة."
+    lines = ["*الجروبات والقنوات:*\n"]
     for cid, info in list(bot_chats.items())[-50:]:
-        icon  = "📣" if info.get("type") == "channel" else "👥"
-        lines.append(f"{icon} `{cid}` — *{info.get('title','—')}* ({info.get('added_at','—')})")
+        icon = "📣" if info.get("type") == "channel" else "👥"
+        lines.append(f"{icon} `{cid}` — *{info.get('title', '—')}* ({info.get('added_at', '—')})")
     return "\n".join(lines)
 
+
 # ══════════════════════════════════════
-#  معالجة /dew — يعمل في DM والمجموعات
+#  معالجة /dew
 # ══════════════════════════════════════
 def handle_dew(message, chat_id, reply_to_id):
     cid  = str(chat_id)
@@ -433,7 +444,6 @@ def handle_dew(message, chat_id, reply_to_id):
     send_typing(chat_id)
     stats["dew_used"] = stats.get("dew_used", 0) + 1
 
-    # رد على صورة
     if "photo" in replied:
         file_content, err = get_file(replied["photo"][-1]["file_id"])
         if err:
@@ -449,7 +459,6 @@ def handle_dew(message, chat_id, reply_to_id):
         send_message(chat_id, reply, reply_to=reply_to_id)
         return
 
-    # رد على ملف
     if "document" in replied:
         doc       = replied["document"]
         file_name = doc.get("file_name", "unknown")
@@ -469,13 +478,12 @@ def handle_dew(message, chat_id, reply_to_id):
         send_message(chat_id, reply, reply_to=reply_to_id)
         return
 
-    # رد على نص
     if "text" in replied and not question:
         question = replied["text"]
 
     if not question:
         send_message(chat_id,
-                     "❓ *كيف تستخدم /dew:*\n\n"
+                     "*كيف تستخدم /dew:*\n\n"
                      "`/dew سؤالك هنا`\n"
                      "أو رد على صورة/ملف/نص بـ /dew",
                      reply_to=reply_to_id)
@@ -491,7 +499,7 @@ def handle_dew(message, chat_id, reply_to_id):
 #  معالجة الأزرار
 # ══════════════════════════════════════
 def handle_callback(callback):
-    data       = callback["data"]
+    data       = callback.get("data", "")
     cb_id      = callback["id"]
     chat_id    = callback["message"]["chat"]["id"]
     message_id = callback["message"]["message_id"]
@@ -501,54 +509,45 @@ def handle_callback(callback):
     answer_callback(cb_id)
 
     if data == "stats_me":
-
-        user_data = user_memory.get(uid, {})
-
+        user_data     = user_memory.get(uid, {})
+        history_count = max(0, len(user_data.get("history", [])) - 1)  # FIX: لا يرجع سالب
         text = (
-            "📊 *إحصائياتك*\n\n"
-            f"🧠 الرسائل المحفوظة: `{max(0, len(user_data.get('history', [])) - 1)}`\n"
-            f"📨 عدد رسائلك: `{user_data.get('msg_count', 0)}`\n"
-            f"📅 تاريخ الانضمام: `{user_data.get('joined_at', '—')[:10]}`"
+            "*إحصائياتك*\n\n"
+            f"الرسائل المحفوظة: `{history_count}`\n"
+            f"عدد رسائلك: `{user_data.get('msg_count', 0)}`\n"
+            f"تاريخ الانضمام: `{user_data.get('joined_at', '—')[:10]}`"
         )
-
-        edit_message(
-            chat_id,
-            message_id,
-            text,
-            back_button()
-        )
+        edit_message(chat_id, message_id, text, back_button())
         return
 
-    # ── زر التحقق من الاشتراك ──
     if data == "check_subscription":
         if check_subscription(int(uid)):
             edit_message(chat_id, message_id,
-                         "✅ *تم التحقق! أهلاً بك.*\n\nالآن يمكنك استخدام البوت.",
+                         "*تم التحقق! أهلاً بك.*\n\nالآن يمكنك استخدام البوت.",
                          main_menu())
         else:
-            answer_callback(cb_id, "❌ لم تشترك بعد! اشترك ثم اضغط التحقق.", alert=True)
+            answer_callback(cb_id, "لم تشترك بعد! اشترك ثم اضغط التحقق.", alert=True)
         return
 
     if data == "noop":
         return
 
     if data == "main_menu":
-        edit_message(chat_id, message_id, "🏠 *القائمة الرئيسية*", main_menu())
+        edit_message(chat_id, message_id, "*القائمة الرئيسية*", main_menu())
         return
 
     if data == "ask_me":
         edit_message(chat_id, message_id,
-                     "💬 *اسألني أي شيء عن Python!*\n\nاكتب سؤالك مباشرة هنا.",
+                     "*اسألني أي شيء عن Python!*\n\nاكتب سؤالك مباشرة هنا.",
                      back_button())
         return
 
-    # أزرار الأدمن — حماية
     if not is_admin and data.startswith("admin"):
-        answer_callback(cb_id, "⛔ غير مصرح لك", alert=True)
+        answer_callback(cb_id, "غير مصرح لك", alert=True)
         return
 
     if data == "back_admin":
-        edit_message(chat_id, message_id, "🛠 *لوحة الأدمن*", admin_menu())
+        edit_message(chat_id, message_id, "*لوحة الأدمن*", admin_menu())
         return
 
     if data == "admin_stats":
@@ -556,7 +555,7 @@ def handle_callback(callback):
         return
 
     if data == "admin_users":
-        lines = ["👥 *المستخدمون (آخر 30):*\n"]
+        lines = ["*المستخدمون (آخر 30):*\n"]
         for uid_k, udata in list(user_memory.items())[-30:]:
             name   = udata.get("name", "—") if isinstance(udata, dict) else "—"
             count  = udata.get("msg_count", 0) if isinstance(udata, dict) else 0
@@ -571,54 +570,44 @@ def handle_callback(callback):
 
     if data == "admin_broadcast_prompt":
         pending_broadcast[uid] = True
-        edit_message(chat_id, message_id,
-                     "📢 *أرسل الآن نص الرسالة للمستخدمين:*", back_button())
+        edit_message(chat_id, message_id, "*أرسل الآن نص الرسالة للمستخدمين:*", back_button())
         return
 
     if data == "admin_group_broadcast_prompt":
         pending_group_broadcast[uid] = True
-        edit_message(chat_id, message_id,
-                     "📣 *أرسل الآن نص الرسالة لجميع المجموعات:*", back_button())
+        edit_message(chat_id, message_id, "*أرسل الآن نص الرسالة لجميع المجموعات:*", back_button())
         return
 
-    # ── إدارة القناة الإجبارية ──
     if data == "admin_channel_menu":
-        edit_message(chat_id, message_id,
-                     "📌 *إدارة الاشتراك الإجباري*",
-                     channel_menu(REQUIRED_CHANNEL))
+        edit_message(chat_id, message_id, "*إدارة الاشتراك الإجباري*", channel_menu(REQUIRED_CHANNEL))
         return
 
     if data == "admin_addchannel_prompt":
         pending_addchannel[uid] = True
         edit_message(chat_id, message_id,
-                     "📌 *أرسل يوزرنيم القناة:*\n\nمثال: `@mychannel`\n\n"
-                     "⚠️ تأكد أن البوت أدمن في القناة أولاً!",
+                     "*أرسل يوزرنيم القناة:*\n\nمثال: `@mychannel`\n\n"
+                     "تأكد أن البوت أدمن في القناة أولاً!",
                      back_button())
         return
 
     if data == "admin_removechannel":
         set_required_channel(None)
-        edit_message(chat_id, message_id,
-                     "✅ *تم إلغاء الاشتراك الإجباري بنجاح.*",
-                     admin_menu())
+        edit_message(chat_id, message_id, "*تم إلغاء الاشتراك الإجباري بنجاح.*", admin_menu())
         return
 
     if data == "admin_ban_prompt":
         pending_ban[uid] = True
-        edit_message(chat_id, message_id,
-                     "🚫 *أرسل ID المستخدم الذي تريد حظره:*", back_button())
+        edit_message(chat_id, message_id, "*أرسل ID المستخدم الذي تريد حظره:*", back_button())
         return
 
     if data == "admin_unban_prompt":
         pending_unban[uid] = True
-        edit_message(chat_id, message_id,
-                     "✅ *أرسل ID المستخدم الذي تريد رفع حظره:*", back_button())
+        edit_message(chat_id, message_id, "*أرسل ID المستخدم الذي تريد رفع حظره:*", back_button())
         return
 
     if data == "admin_clear_prompt":
         pending_clear[uid] = True
-        edit_message(chat_id, message_id,
-                     "🗑 *أرسل ID المستخدم الذي تريد مسح ذاكرته:*", back_button())
+        edit_message(chat_id, message_id, "*أرسل ID المستخدم الذي تريد مسح ذاكرته:*", back_button())
         return
 
 
@@ -628,33 +617,31 @@ def handle_callback(callback):
 def handle_command(chat_id, command, is_admin, user_name="", username="", user_obj=None):
     cid = str(chat_id)
 
-    if cid not in user_memory:
+    if cid not in user_memory:  # FIX: تهيئة المستخدم إذا غير موجود
         get_history(cid, user_obj)
 
     if command.startswith("/start"):
-        get_history(cid, user_obj)
         user_memory[cid]["name"]     = user_name
         user_memory[cid]["username"] = username
         save_json(MEMORY_FILE, user_memory)
         send_message(chat_id,
-                     f"🐍 *أهلاً {user_name or 'بك'} في بوت Python!*\n\n"
+                     f"*أهلاً {user_name or 'بك'} في بوت Python!*\n\n"
                      "اسألني أي شيء عن Python مباشرةً،\n"
                      "أو أرسل صورة/ملف للتحليل.\n\n"
                      "في المجموعات استخدم الأمر /dew",
                      reply_markup=main_menu())
-        # لوحة الأدمن تلقائياً عند /start
         if is_admin:
-            send_message(chat_id, "🛠 *لوحة الأدمن*", reply_markup=admin_menu())
+            send_message(chat_id, "*لوحة الأدمن*", reply_markup=admin_menu())
         return True
 
     if command == "/menu":
-        send_message(chat_id, "🏠 *القائمة الرئيسية*", reply_markup=main_menu())
+        send_message(chat_id, "*القائمة الرئيسية*", reply_markup=main_menu())
         return True
 
     if command == "/clear":
         user_memory[cid]["history"] = [{"role": "system", "content": SYSTEM_PROMPT}]
         save_json(MEMORY_FILE, user_memory)
-        send_message(chat_id, "✅ تم مسح المحادثة")
+        send_message(chat_id, "تم مسح المحادثة")
         return True
 
     if command == "/stats":
@@ -663,11 +650,11 @@ def handle_command(chat_id, command, is_admin, user_name="", username="", user_o
 
     if command == "/help":
         send_message(chat_id,
-                     "📚 *طريقة الاستخدام:*\n\n"
+                     "*طريقة الاستخدام:*\n\n"
                      "*في المحادثة الخاصة:*\n"
-                     "• اكتب سؤالك مباشرة\n"
-                     "• أرسل صورة فيها كود\n"
-                     "• أرسل ملف .py أو .txt\n\n"
+                     "- اكتب سؤالك مباشرة\n"
+                     "- أرسل صورة فيها كود\n"
+                     "- أرسل ملف .py أو .txt\n\n"
                      "*في المجموعات:*\n"
                      "`/dew سؤالك هنا`\n"
                      "رد على صورة/ملف/نص بـ /dew\n\n"
@@ -676,7 +663,7 @@ def handle_command(chat_id, command, is_admin, user_name="", username="", user_o
         return True
 
     if command == "/admin" and is_admin:
-        send_message(chat_id, "🛠 *لوحة الأدمن*", reply_markup=admin_menu())
+        send_message(chat_id, "*لوحة الأدمن*", reply_markup=admin_menu())
         return True
 
     return False
@@ -684,51 +671,58 @@ def handle_command(chat_id, command, is_admin, user_name="", username="", user_o
 
 def _do_broadcast(admin_id, msg_text):
     if not msg_text:
-        send_message(admin_id, "❌ الرسالة فارغة")
+        send_message(admin_id, "الرسالة فارغة")
         return
-    send_message(admin_id, f"⏳ جاري الإرسال لـ {len(user_memory)} مستخدم...")
+    send_message(admin_id, f"جاري الإرسال لـ {len(user_memory)} مستخدم...")
     def _send(uid):
         try:
-            send_message(uid, f"📢 *رسالة من الأدمن:*\n\n{msg_text}")
+            send_message(uid, f"*رسالة من الأدمن:*\n\n{msg_text}")
             time.sleep(0.05)
             return True
         except Exception:
             return False
     with ThreadPoolExecutor(max_workers=10) as ex:
         ok = sum(ex.map(_send, user_memory.keys()))
-    send_message(admin_id, f"✅ أُرسل لـ {ok} / {len(user_memory)} مستخدم")
+    send_message(admin_id, f"أُرسل لـ {ok} / {len(user_memory)} مستخدم")
 
 
 def _do_group_broadcast(admin_id, msg_text):
     if not msg_text:
-        send_message(admin_id, "❌ الرسالة فارغة")
+        send_message(admin_id, "الرسالة فارغة")
         return
-    send_message(admin_id, f"⏳ جاري الإرسال لـ {len(bot_chats)} مجموعة/قناة...")
+    send_message(admin_id, f"جاري الإرسال لـ {len(bot_chats)} مجموعة/قناة...")
     def _send(cid):
         try:
-            send_message(cid, f"📣 *إعلان:*\n\n{msg_text}")
+            send_message(cid, f"*إعلان:*\n\n{msg_text}")
             time.sleep(0.1)
             return True
         except Exception:
             return False
     with ThreadPoolExecutor(max_workers=5) as ex:
         ok = sum(ex.map(_send, bot_chats.keys()))
-    send_message(admin_id, f"✅ أُرسل لـ {ok} / {len(bot_chats)} مجموعة/قناة")
+    send_message(admin_id, f"أُرسل لـ {ok} / {len(bot_chats)} مجموعة/قناة")
 
 
 # ══════════════════════════════════════
 #  الحلقة الرئيسية
 # ══════════════════════════════════════
 offset = 0
-log.info("🚀 البوت يعمل...")
+log.info("البوت يعمل...")
 
 while True:
     try:
-        resp    = requests.get(
-            f"{TELEGRAM_URL}/getUpdates?timeout=100&offset={offset}",
+        resp = requests.get(
+            f"{TELEGRAM_URL}/getUpdates",
+            params={"timeout": 100, "offset": offset},
             timeout=120
         )
         updates = resp.json()
+
+        # FIX: تحقق من ok قبل المعالجة
+        if not updates.get("ok"):
+            log.error(f"getUpdates فشل: {updates}")
+            time.sleep(5)
+            continue
 
         for update in updates.get("result", []):
             offset = update["update_id"] + 1
@@ -757,15 +751,15 @@ while True:
             if not message:
                 continue
 
-            chat      = message.get("chat", {})
-            chat_id   = str(chat.get("id", ""))
+            chat    = message.get("chat", {})
+            chat_id = str(chat.get("id", ""))
             if not chat_id:
                 continue
 
             chat_type = chat.get("type", "private")
             is_group  = chat_type in ("group", "supergroup")
             user      = message.get("from", {})
-            uid       = str(user.get("id", ""))
+            uid       = str(user.get("id", "")) if user.get("id") else ""
             user_name = user.get("first_name", "") or user.get("username", "")
             username  = user.get("username", "")
             is_admin  = int(uid) in ADMINS if uid else False
@@ -774,7 +768,7 @@ while True:
             if is_group:
                 register_chat(chat)
 
-            if uid in banned_users:
+            if uid and uid in banned_users:
                 continue
 
             try:
@@ -801,40 +795,39 @@ while True:
                             ch = "@" + ch
                         set_required_channel(ch)
                         send_message(uid,
-                                     f"✅ *تم تفعيل الاشتراك الإجباري!*\n\n"
-                                     f"📌 القناة: `{ch}`\n\n"
-                                     f"⚠️ تأكد أن البوت أدمن في القناة.",
+                                     f"*تم تفعيل الاشتراك الإجباري!*\n\n"
+                                     f"القناة: `{ch}`\n\n"
+                                     f"تأكد أن البوت أدمن في القناة.",
                                      reply_markup=admin_menu())
                         continue
                     if uid in pending_ban and pending_ban.pop(uid):
                         banned_users.add(text.strip())
                         save_json(BANNED_FILE, list(banned_users))
-                        send_message(uid, f"🚫 تم حظر المستخدم `{text.strip()}`")
+                        send_message(uid, f"تم حظر المستخدم `{text.strip()}`")
                         continue
                     if uid in pending_unban and pending_unban.pop(uid):
                         banned_users.discard(text.strip())
                         save_json(BANNED_FILE, list(banned_users))
-                        send_message(uid, f"✅ تم رفع الحظر عن `{text.strip()}`")
+                        send_message(uid, f"تم رفع الحظر عن `{text.strip()}`")
                         continue
                     if uid in pending_clear and pending_clear.pop(uid):
                         target = text.strip()
                         if target in user_memory:
                             user_memory[target]["history"] = [{"role": "system", "content": SYSTEM_PROMPT}]
                             save_json(MEMORY_FILE, user_memory)
-                            send_message(uid, f"🗑 تم مسح ذاكرة `{target}`")
+                            send_message(uid, f"تم مسح ذاكرة `{target}`")
                         else:
-                            send_message(uid, f"❓ المستخدم `{target}` غير موجود")
+                            send_message(uid, f"المستخدم `{target}` غير موجود")
                         continue
 
                     if handle_command(chat_id, text, is_admin, user_name, username, user):
                         continue
 
-                    # ── تحقق من الاشتراك الإجباري (غير الأدمن فقط) ──
+                    # تحقق من الاشتراك الإجباري
                     if not is_admin and uid and REQUIRED_CHANNEL and not check_subscription(int(uid)):
                         send_message(
                             chat_id,
-                            f"⚠️ *يجب الاشتراك في قناتنا أولاً!*\n\n"
-                            f"اشترك ثم اضغط ✅ تحققت.",
+                            "*يجب الاشتراك في قناتنا أولاً!*\n\nاشترك ثم اضغط تحققت.",
                             reply_markup=subscription_required_keyboard(REQUIRED_CHANNEL)
                         )
                         continue
@@ -842,7 +835,7 @@ while True:
                     now  = time.time()
                     last = user_last_message.get(chat_id, 0)
                     if now - last < RATE_LIMIT:
-                        send_message(chat_id, f"⏳ انتظر {RATE_LIMIT} ثواني بين الرسائل...")
+                        send_message(chat_id, f"انتظر {RATE_LIMIT} ثواني بين الرسائل...")
                         continue
                     user_last_message[chat_id] = now
 
@@ -853,12 +846,10 @@ while True:
                     send_message(chat_id, reply)
 
                 elif "photo" in message and not is_group:
-                    # ── تحقق من الاشتراك الإجباري ──
                     if not is_admin and uid and REQUIRED_CHANNEL and not check_subscription(int(uid)):
                         send_message(
                             chat_id,
-                            f"⚠️ *يجب الاشتراك في قناتنا أولاً!*\n\n"
-                            f"اشترك ثم اضغط ✅ تحققت.",
+                            "*يجب الاشتراك في قناتنا أولاً!*\n\nاشترك ثم اضغط تحققت.",
                             reply_markup=subscription_required_keyboard(REQUIRED_CHANNEL)
                         )
                         continue
@@ -870,19 +861,17 @@ while True:
                         push_user(chat_id, caption)
                         send_typing(chat_id)
                         img_b64 = "data:image/jpeg;base64," + base64.b64encode(file_content).decode()
-                        reply = ask_groq_vision(get_history(chat_id, user), img_b64)
+                        reply   = ask_groq_vision(get_history(chat_id, user), img_b64)
                         push_assistant(chat_id, reply)
                         stats["total_images"] = stats.get("total_images", 0) + 1
                         save_json(STATS_FILE, stats)
                         send_message(chat_id, reply)
 
                 elif "document" in message and not is_group:
-                    # ── تحقق من الاشتراك الإجباري ──
                     if not is_admin and uid and REQUIRED_CHANNEL and not check_subscription(int(uid)):
                         send_message(
                             chat_id,
-                            f"⚠️ *يجب الاشتراك في قناتنا أولاً!*\n\n"
-                            f"اشترك ثم اضغط ✅ تحققت.",
+                            "*يجب الاشتراك في قناتنا أولاً!*\n\nاشترك ثم اضغط تحققت.",
                             reply_markup=subscription_required_keyboard(REQUIRED_CHANNEL)
                         )
                         continue
@@ -904,11 +893,10 @@ while True:
             except Exception as e:
                 log.error(f"update error: {e}", exc_info=True)
                 try:
-                    send_message(chat_id, "❌ حدث خطأ، حاول مرة أخرى")
+                    send_message(chat_id, "حدث خطأ، حاول مرة أخرى")
                 except Exception:
                     pass
 
     except Exception as e:
         log.error(f"connection error: {e}")
         time.sleep(5)
-
