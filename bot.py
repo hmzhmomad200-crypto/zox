@@ -877,5 +877,4 @@ while True:
     except Exception as e:
         log.error(f"connection error: {e}")
         time.sleep(5)
-PYEOF
-echo "bot.py done"
+
