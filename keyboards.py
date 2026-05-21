@@ -6,10 +6,10 @@ BOT_USERNAME = os.getenv("BOT_USERNAME", "your_bot")
 def main_menu():
     return {
         "inline_keyboard": [
-            [
-                {"text": "➕ أضفني لمجموعاتك", "url": f"https://t.me/{BOT_USERNAME}?startgroup=true"},
-                {"text": "💬 اسألني", "callback_data": "ask_me"}
-            ]
+            [{"text": "💬 اسألني", "callback_data": "ask_me"}],
+            [{"text": "📊 إحصائياتي", "callback_data": "stats_me"}],
+            [{"text": "➕ أضفني للمجموعة",
+              "url": f"https://t.me/{BOT_USERNAME}?startgroup=start"}],
         ]
     }
 
