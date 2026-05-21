@@ -27,11 +27,17 @@ log = logging.getLogger(__name__)
 # ══════════════════════════════════════
 BOT_TOKEN    = os.getenv("BOT_TOKEN",    "ضع_توكن_البوت_هنا")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "your_bot")
-# ══ 6 مفاتيح Groq — rotation تلقائي عند 429 ══
-_groq_keys_raw = os.getenv("GROQ_API_KEYS", os.getenv("GROQ_API_KEY", ""))
-GROQ_API_KEYS  = [k.strip() for k in _groq_keys_raw.split(",") if k.strip()]
+# ══ 6 مفاتيح Groq — كل مفتاح متغير منفصل في Railway ══
+# GROQ_API_KEY_1 , GROQ_API_KEY_2 , ... , GROQ_API_KEY_6
+GROQ_API_KEYS = [
+    os.getenv(f"GROQ_API_KEY_{i}")
+    for i in range(1, 7)
+]
+GROQ_API_KEYS = [k for k in GROQ_API_KEYS if k]  # نزيل الفارغة
 if not GROQ_API_KEYS:
-    GROQ_API_KEYS = ["ضع_مفتاح_GROQ_هنا"]
+    # fallback للمتغير القديم
+    _old = os.getenv("GROQ_API_KEY", "ضع_مفتاح_GROQ_هنا")
+    GROQ_API_KEYS = [_old]
 _groq_index = 0
 
 def _get_groq_key():
