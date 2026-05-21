@@ -32,7 +32,7 @@ BOT_USERNAME = os.getenv("BOT_USERNAME", "your_bot")
 # GROQ_API_KEY_1 , GROQ_API_KEY_2 , ... , GROQ_API_KEY_6
 GROQ_API_KEYS = [
     os.getenv(f"GROQ_API_KEY_{i}")
-    for i in range(1, 101)
+    for i in range(1, 7)
 ]
 GROQ_API_KEYS = [k for k in GROQ_API_KEYS if k]  # نزيل الفارغة
 if not GROQ_API_KEYS:
@@ -241,18 +241,16 @@ def ask_groq_fix(file_text, file_name):
         }
         try:
             r = requests.post(GROQ_URL, headers=headers, json=data, timeout=90)
-            if r.status_code in (429, 401):
-                log.warning(f"Groq fix key #{_groq_index+1} returned {r.status_code}, switching...")
-                _next_groq_key()
-                time.sleep(0.5)
-                continue
-            r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"]
+            if r.status_code == 200:
+                return r.json()["choices"][0]["message"]["content"]
+            log.warning(f"Groq fix key #{_groq_index+1} returned {r.status_code}, switching...")
+            _next_groq_key()
+            time.sleep(0.3)
+            continue
         except requests.exceptions.Timeout:
             return None
         except Exception:
-            _next_groq_key()
-            continue
+            return None
     return None
 
 
@@ -379,18 +377,15 @@ def ask_groq(messages):
         }
         try:
             r = requests.post(GROQ_URL, headers=headers, json=data, timeout=60)
-            if r.status_code in (429, 401):
-                log.warning(f"Groq key #{_groq_index+1} returned {r.status_code}, switching...")
-                _next_groq_key()
-                time.sleep(0.5)
-                continue
-            r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"]
+            if r.status_code == 200:
+                return r.json()["choices"][0]["message"]["content"]
+            # أي خطأ — جرب المفتاح التالي
+            log.warning(f"Groq key #{_groq_index+1} returned {r.status_code}, switching...")
+            _next_groq_key()
+            time.sleep(0.3)
+            continue
         except requests.exceptions.Timeout:
             return "⏱ انتهت مهلة الاتصال، حاول مرة أخرى"
-        except requests.exceptions.HTTPError:
-            _next_groq_key()
-            continue
         except requests.exceptions.RequestException as e:
             return f"❌ خطأ في الاتصال: {e}"
         except (KeyError, IndexError):
@@ -420,20 +415,16 @@ def ask_groq_vision(messages, image_b64):
         }
         try:
             r = requests.post(GROQ_URL, headers=headers, json=data, timeout=90)
-            if r.status_code in (429, 401):
-                log.warning(f"Groq vision key #{_groq_index+1} returned {r.status_code}, switching...")
-                _next_groq_key()
-                time.sleep(0.5)
-                continue
+            if r.status_code == 200:
+                return r.json()["choices"][0]["message"]["content"]
             if r.status_code == 400:
                 return "❌ خطأ في الصورة: تأكد أن الصورة واضحة وصيغتها JPEG/PNG"
-            r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"]
+            log.warning(f"Groq vision key #{_groq_index+1} returned {r.status_code}, switching...")
+            _next_groq_key()
+            time.sleep(0.3)
+            continue
         except requests.exceptions.Timeout:
             return "⏱ انتهت مهلة الاتصال عند معالجة الصورة"
-        except requests.exceptions.HTTPError:
-            _next_groq_key()
-            continue
         except Exception as e:
             return f"❌ خطأ في معالجة الصورة: {e}"
     return "⏳ كل المفاتيح مشغولة حالياً، حاول بعد لحظة"
