@@ -12,13 +12,12 @@ from keyboards import main_menu, back_button, admin_menu, channel_menu, subscrip
 # ══════════════════════════════════════
 #  إعداد السجلات
 # ══════════════════════════════════════
-import sys
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.FileHandler("bot.log", encoding="utf-8"),
-        logging.StreamHandler(sys.stdout)
+        logging.StreamHandler()
     ]
 )
 log = logging.getLogger(__name__)
@@ -28,27 +27,7 @@ log = logging.getLogger(__name__)
 # ══════════════════════════════════════
 BOT_TOKEN    = os.getenv("BOT_TOKEN",    "ضع_توكن_البوت_هنا")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "your_bot")
-# ══ 6 مفاتيح Groq — كل مفتاح متغير منفصل في Railway ══
-# GROQ_API_KEY_1 , GROQ_API_KEY_2 , ... , GROQ_API_KEY_6
-GROQ_API_KEYS = [
-    os.getenv(f"GROQ_API_KEY_{i}")
-    for i in range(1, 7)
-]
-GROQ_API_KEYS = [k for k in GROQ_API_KEYS if k]  # نزيل الفارغة
-if not GROQ_API_KEYS:
-    # fallback للمتغير القديم
-    _old = os.getenv("GROQ_API_KEY", "ضع_مفتاح_GROQ_هنا")
-    GROQ_API_KEYS = [_old]
-_groq_index = 0
-
-def _get_groq_key():
-    return GROQ_API_KEYS[_groq_index % len(GROQ_API_KEYS)]
-
-def _next_groq_key():
-    global _groq_index
-    _groq_index = (_groq_index + 1) % len(GROQ_API_KEYS)
-    return GROQ_API_KEYS[_groq_index]
-
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "ضع_مفتاح_GROQ_هنا")
 ADMINS       = [int(x) for x in os.getenv("ADMINS", "123456789").split(",") if x.strip()]
 
 TELEGRAM_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -189,128 +168,6 @@ def send_typing(chat_id):
         pass
 
 
-
-
-def send_document(chat_id, file_bytes, file_name, caption=""):
-    """يرسل ملف للمستخدم"""
-    try:
-        requests.post(
-            f"{TELEGRAM_URL}/sendDocument",
-            data={"chat_id": str(chat_id), "caption": caption, "parse_mode": "Markdown"},
-            files={"document": (file_name, file_bytes)},
-            timeout=30
-        )
-    except Exception as e:
-        log.error(f"send_document: {e}")
-
-
-def ask_groq_fix(file_text, file_name):
-    """
-    يطلب من النموذج:
-    1. تحليل الأعطال
-    2. إرجاع الكود المصلح كاملاً بين ``` ```
-    """
-    prompt = f"""أنت خبير Python. لديك الملف التالي:
-
-اسم الملف: {file_name}
-
-```
-{file_text[:6000]}
-```
-
-المطلوب:
-1. اذكر الأعطال والمشاكل الموجودة بوضوح (قائمة مرقمة)
-2. بعدها أرسل الكود المصلح كاملاً بين ```python و```
-لا تحذف أي كود — أرسل الملف كاملاً مصلحاً."""
-
-    messages = [
-        {"role": "system", "content": "أنت خبير Python. أجب بالعربية دائماً."},
-        {"role": "user",   "content": prompt}
-    ]
-    attempts = len(GROQ_API_KEYS)
-    for _ in range(attempts):
-        headers = {
-            "Authorization": f"Bearer {_get_groq_key()}",
-            "Content-Type" : "application/json"
-        }
-        data = {
-            "model"      : "llama-3.1-8b-instant",
-            "messages"   : messages,
-            "temperature": 0.2,
-            "max_tokens" : 4096
-        }
-        try:
-            r = requests.post(GROQ_URL, headers=headers, json=data, timeout=90)
-            if r.status_code == 200:
-                return r.json()["choices"][0]["message"]["content"]
-            log.warning(f"Groq fix key #{_groq_index+1} returned {r.status_code}, switching...")
-            _next_groq_key()
-            time.sleep(0.3)
-            continue
-        except requests.exceptions.Timeout:
-            return None
-        except Exception:
-            return None
-    return None
-
-
-def extract_code_block(text):
-    """يستخرج الكود من بين ``` ``` في الرد"""
-    import re
-    # يحاول ```python ... ``` أو ``` ... ```
-    patterns = [
-        r"```python\s*([\s\S]+?)```",
-        r"```\w*\s*([\s\S]+?)```",
-    ]
-    for pat in patterns:
-        m = re.search(pat, text)
-        if m:
-            return m.group(1).strip()
-    return None
-
-
-def handle_file_fix(chat_id, file_content, file_name, reply_to_id=None):
-    """
-    المنطق الكامل: يحلل الملف، يصلحه، يرسل الشرح + الملف المصلح
-    """
-    send_typing(chat_id)
-    file_text = process_file(file_content, file_name)
-
-    # لو الملف غير نصي
-    if "نوع غير مدعوم" in file_text:
-        send_message(chat_id,
-                     f"❌ نوع الملف `{file_name}` غير مدعوم للتحليل.\nالمدعوم: .py .js .txt .json .html .css .md",
-                     reply_to=reply_to_id)
-        return
-
-    send_message(chat_id, "🔍 جاري تحليل الملف وإصلاح الأعطال...", reply_to=reply_to_id)
-    result = ask_groq_fix(file_text, file_name)
-
-    if not result:
-        send_message(chat_id, "❌ فشل التحليل، حاول مرة أخرى", reply_to=reply_to_id)
-        return
-
-    fixed_code = extract_code_block(result)
-
-    # إرسال الشرح (نزيل الكود الطويل من الرسالة لتكون نظيفة)
-    import re
-    explanation = re.sub(r"```[\s\S]*?```", "", result).strip()
-    if explanation:
-        send_message(chat_id, explanation, reply_to=reply_to_id)
-
-    # إرسال الملف المصلح إن وُجد
-    if fixed_code:
-        fixed_bytes = fixed_code.encode("utf-8")
-        # اسم الملف المصلح
-        name_parts = file_name.rsplit(".", 1)
-        fixed_name = f"{name_parts[0]}_fixed.{name_parts[1]}" if len(name_parts) == 2 else f"{file_name}_fixed"
-        send_document(chat_id, fixed_bytes, fixed_name,
-                      caption=f"✅ *الملف المصلح:* `{fixed_name}`")
-    else:
-        send_message(chat_id,
-                     "⚠️ لم يتمكن النموذج من استخراج كود مصلح كامل.\nجرب أرسل الملف مجدداً أو استخدم /dew مع سؤال محدد.",
-                     reply_to=reply_to_id)
-
 def get_file(file_id, max_size=MAX_FILE_SIZE):
     try:
         info = requests.get(
@@ -362,39 +219,37 @@ def set_required_channel(channel):
 #  دوال Groq
 # ══════════════════════════════════════
 def ask_groq(messages):
-    """يحاول كل المفاتيح عند 429 قبل الاستسلام"""
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type" : "application/json"
+    }
     data = {
-        "model"      : "llama-3.1-8b-instant",
+        "model"      : "llama-3.3-70b-versatile",
         "messages"   : messages,
         "temperature": 0.3,
         "max_tokens" : 2048
     }
-    attempts = len(GROQ_API_KEYS)
-    for _ in range(attempts):
-        headers = {
-            "Authorization": f"Bearer {_get_groq_key()}",
-            "Content-Type" : "application/json"
-        }
-        try:
-            r = requests.post(GROQ_URL, headers=headers, json=data, timeout=60)
-            if r.status_code == 200:
-                return r.json()["choices"][0]["message"]["content"]
-            # أي خطأ — جرب المفتاح التالي
-            log.warning(f"Groq key #{_groq_index+1} returned {r.status_code}, switching...")
-            _next_groq_key()
-            time.sleep(0.3)
-            continue
-        except requests.exceptions.Timeout:
-            return "⏱ انتهت مهلة الاتصال، حاول مرة أخرى"
-        except requests.exceptions.RequestException as e:
-            return f"❌ خطأ في الاتصال: {e}"
-        except (KeyError, IndexError):
-            return "❌ استجابة غير صحيحة من الخادم"
-    return "⏳ كل المفاتيح مشغولة حالياً، حاول بعد لحظة"
+    try:
+        r = requests.post(GROQ_URL, headers=headers, json=data, timeout=60)
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"]
+    except requests.exceptions.Timeout:
+        return "⏱ انتهت مهلة الاتصال، حاول مرة أخرى"
+    except requests.exceptions.HTTPError:
+        if r.status_code == 429:
+            return "⏳ الخادم مشغول حالياً، حاول بعد لحظة"
+        return f"❌ خطأ HTTP {r.status_code}"
+    except requests.exceptions.RequestException as e:
+        return f"❌ خطأ في الاتصال: {e}"
+    except (KeyError, IndexError):
+        return "❌ استجابة غير صحيحة من الخادم"
 
 
 def ask_groq_vision(messages, image_b64):
-    """يحاول كل المفاتيح عند 429 قبل الاستسلام"""
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type" : "application/json"
+    }
     msgs = copy.deepcopy(messages)
     last_text = msgs[-1]["content"]
     msgs[-1]["content"] = [
@@ -402,32 +257,25 @@ def ask_groq_vision(messages, image_b64):
         {"type": "image_url", "image_url": {"url": image_b64}}
     ]
     data = {
-        "model"      : "llama-3.2-90b-vision-preview",
+        "model"      : "meta-llama/llama-4-scout-17b-16e-instruct",
         "messages"   : msgs,
         "temperature": 0.3,
         "max_tokens" : 2048
     }
-    attempts = len(GROQ_API_KEYS)
-    for _ in range(attempts):
-        headers = {
-            "Authorization": f"Bearer {_get_groq_key()}",
-            "Content-Type" : "application/json"
-        }
-        try:
-            r = requests.post(GROQ_URL, headers=headers, json=data, timeout=90)
-            if r.status_code == 200:
-                return r.json()["choices"][0]["message"]["content"]
-            if r.status_code == 400:
-                return "❌ خطأ في الصورة: تأكد أن الصورة واضحة وصيغتها JPEG/PNG"
-            log.warning(f"Groq vision key #{_groq_index+1} returned {r.status_code}, switching...")
-            _next_groq_key()
-            time.sleep(0.3)
-            continue
-        except requests.exceptions.Timeout:
-            return "⏱ انتهت مهلة الاتصال عند معالجة الصورة"
-        except Exception as e:
-            return f"❌ خطأ في معالجة الصورة: {e}"
-    return "⏳ كل المفاتيح مشغولة حالياً، حاول بعد لحظة"
+    try:
+        r = requests.post(GROQ_URL, headers=headers, json=data, timeout=90)
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"]
+    except requests.exceptions.Timeout:
+        return "⏱ انتهت مهلة الاتصال عند معالجة الصورة"
+    except requests.exceptions.HTTPError:
+        if r.status_code == 400:
+            return "❌ خطأ في الصورة: تأكد أن الصورة واضحة وصيغتها JPEG/PNG"
+        if r.status_code == 429:
+            return "⏳ الخادم مشغول، حاول بعد لحظة"
+        return f"❌ خطأ HTTP {r.status_code}"
+    except Exception as e:
+        return f"❌ خطأ في معالجة الصورة: {e}"
 
 
 # ══════════════════════════════════════
@@ -597,7 +445,7 @@ def handle_dew(message, chat_id, reply_to_id):
         send_message(chat_id, reply, reply_to=reply_to_id)
         return
 
-    # رد على ملف — تحليل وإصلاح تلقائي
+    # رد على ملف
     if "document" in replied:
         doc       = replied["document"]
         file_name = doc.get("file_name", "unknown")
@@ -605,9 +453,16 @@ def handle_dew(message, chat_id, reply_to_id):
         if err:
             send_message(chat_id, err, reply_to=reply_to_id)
             return
+        file_text = process_file(file_content, file_name)
+        user_msg  = f"ملف: {file_name}\n\n{file_text[:3000]}"
+        if question:
+            user_msg += f"\n\nالسؤال: {question}"
+        push_user(cid, user_msg)
+        reply = ask_groq(get_history(cid))
+        push_assistant(cid, reply)
         stats["total_files"] = stats.get("total_files", 0) + 1
         save_json(STATS_FILE, stats)
-        handle_file_fix(chat_id, file_content, file_name, reply_to_id)
+        send_message(chat_id, reply, reply_to=reply_to_id)
         return
 
     # رد على نص
@@ -769,6 +624,9 @@ def handle_callback(callback):
 def handle_command(chat_id, command, is_admin, user_name="", username="", user_obj=None):
     cid = str(chat_id)
 
+    if cid not in user_memory:
+        get_history(cid, user_obj)
+
     if command.startswith("/start"):
         get_history(cid, user_obj)
         user_memory[cid]["name"]     = user_name
@@ -859,9 +717,6 @@ def _do_group_broadcast(admin_id, msg_text):
 # ══════════════════════════════════════
 offset = 0
 log.info("🚀 البوت يعمل...")
-log.info(f"🔑 عدد مفاتيح Groq المحملة: {len(GROQ_API_KEYS)}")
-for _i, _k in enumerate(GROQ_API_KEYS):
-    log.info(f"   مفتاح #{_i+1}: {_k[:8]}...")
 
 while True:
     try:
@@ -971,7 +826,7 @@ while True:
                         continue
 
                     # ── تحقق من الاشتراك الإجباري (غير الأدمن فقط) ──
-                    if not is_admin and REQUIRED_CHANNEL and not check_subscription(int(uid)):
+                    if not is_admin and uid and REQUIRED_CHANNEL and not check_subscription(int(uid)):
                         send_message(
                             chat_id,
                             f"⚠️ *يجب الاشتراك في قناتنا أولاً!*\n\n"
@@ -995,7 +850,7 @@ while True:
 
                 elif "photo" in message and not is_group:
                     # ── تحقق من الاشتراك الإجباري ──
-                    if not is_admin and REQUIRED_CHANNEL and not check_subscription(int(uid)):
+                    if not is_admin and uid and REQUIRED_CHANNEL and not check_subscription(int(uid)):
                         send_message(
                             chat_id,
                             f"⚠️ *يجب الاشتراك في قناتنا أولاً!*\n\n"
@@ -1019,7 +874,7 @@ while True:
 
                 elif "document" in message and not is_group:
                     # ── تحقق من الاشتراك الإجباري ──
-                    if not is_admin and REQUIRED_CHANNEL and not check_subscription(int(uid)):
+                    if not is_admin and uid and REQUIRED_CHANNEL and not check_subscription(int(uid)):
                         send_message(
                             chat_id,
                             f"⚠️ *يجب الاشتراك في قناتنا أولاً!*\n\n"
@@ -1033,9 +888,14 @@ while True:
                     if err:
                         send_message(chat_id, err)
                     else:
+                        send_typing(chat_id)
+                        file_text = process_file(file_content, file_name)
+                        push_user(chat_id, f"ملف: {file_name}\n\n{file_text[:3000]}")
+                        reply = ask_groq(get_history(chat_id, user))
+                        push_assistant(chat_id, reply)
                         stats["total_files"] = stats.get("total_files", 0) + 1
                         save_json(STATS_FILE, stats)
-                        handle_file_fix(chat_id, file_content, file_name)
+                        send_message(chat_id, reply)
 
             except Exception as e:
                 log.error(f"update error: {e}", exc_info=True)
