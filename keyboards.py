@@ -9,7 +9,7 @@ def main_menu():
             [{"text": "💬 اسألني", "callback_data": "ask_me"}],
             [{"text": "📊 إحصائياتي", "callback_data": "stats_me"}],
             [{"text": "➕ أضفني للمجموعة",
-              "url": f"https://t.me/{aibewbot}?startgroup=start"}],
+              "url": f"https://t.me/{BOT_USERNAME}?startgroup=start"}],
         ]
     }
 
