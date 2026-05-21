@@ -119,16 +119,16 @@ def send_message(chat_id, text, reply_markup=None,
     for idx, chunk in enumerate(chunks):
         payload = {"chat_id": chat_id, "text": chunk, "parse_mode": parse_mode}
         if reply_markup and idx == len(chunks) - 1:
-            payload["reply_markup"] = json.dumps(reply_markup)
+            payload["reply_markup"] = reply_markup
         if reply_to:
             payload["reply_to_message_id"] = reply_to
         try:
             r = requests.post(f"{TELEGRAM_URL}/sendMessage",
-                              data=payload, timeout=15)
+                              json=payload, timeout=15)
             if not r.json().get("ok"):
                 payload.pop("parse_mode", None)
                 requests.post(f"{TELEGRAM_URL}/sendMessage",
-                              data=payload, timeout=15)
+                              json=payload, timeout=15)
         except Exception as e:
             log.error(f"send_message({chat_id}): {e}")
 
@@ -141,10 +141,10 @@ def edit_message(chat_id, message_id, text, reply_markup=None):
         "parse_mode": "Markdown"
     }
     if reply_markup:
-        payload["reply_markup"] = json.dumps(reply_markup)
+        payload["reply_markup"] = reply_markup
     try:
         requests.post(f"{TELEGRAM_URL}/editMessageText",
-                      data=payload, timeout=15)
+                      json=payload, timeout=15)
     except Exception as e:
         log.error(f"edit_message: {e}")
 
@@ -152,7 +152,7 @@ def edit_message(chat_id, message_id, text, reply_markup=None):
 def answer_callback(cb_id, text="", alert=False):
     try:
         requests.post(f"{TELEGRAM_URL}/answerCallbackQuery",
-                      data={"callback_query_id": cb_id,
+                      json={"callback_query_id": cb_id,
                             "text": text, "show_alert": alert},
                       timeout=10)
     except Exception:
@@ -162,7 +162,7 @@ def answer_callback(cb_id, text="", alert=False):
 def send_typing(chat_id):
     try:
         requests.post(f"{TELEGRAM_URL}/sendChatAction",
-                      data={"chat_id": str(chat_id), "action": "typing"},
+                      json={"chat_id": str(chat_id), "action": "typing"},
                       timeout=10)
     except Exception:
         pass
@@ -350,6 +350,8 @@ def get_history(chat_id, user_info=None):
 
 def trim_history(chat_id):
     cid = str(chat_id)
+    if cid not in user_memory:
+        return
     h   = user_memory[cid]["history"]
     if len(h) > MAX_HISTORY:
         user_memory[cid]["history"] = [h[0]] + h[-(MAX_HISTORY - 1):]
@@ -360,6 +362,8 @@ def push_user(chat_id, content):
 
 def push_assistant(chat_id, content):
     cid = str(chat_id)
+    if cid not in user_memory:
+        get_history(cid)
     user_memory[cid]["history"].append({"role": "assistant", "content": content})
     user_memory[cid]["msg_count"] = user_memory[cid].get("msg_count", 0) + 1
     stats["total_messages"] += 1
@@ -397,7 +401,7 @@ def build_stats_text(cid=None):
         lines += [
             "",
             "👤 *بياناتك الشخصية*",
-            f"🧠 رسائلك المحفوظة : `{len(uid_data.get('history', [])) - 1}`",
+            f"🧠 رسائلك المحفوظة : `{max(0, len(uid_data.get('history', [])) - 1)}`",
             f"📨 مجموع رسائلك    : `{uid_data.get('msg_count', 0)}`",
             f"📅 انضممت          : `{uid_data.get('joined_at', '—')[:10]}`",
         ]
@@ -502,7 +506,7 @@ def handle_callback(callback):
 
         text = (
             "📊 *إحصائياتك*\n\n"
-            f"🧠 الرسائل المحفوظة: `{len(user_data.get('history', [])) - 1}`\n"
+            f"🧠 الرسائل المحفوظة: `{max(0, len(user_data.get('history', [])) - 1)}`\n"
             f"📨 عدد رسائلك: `{user_data.get('msg_count', 0)}`\n"
             f"📅 تاريخ الانضمام: `{user_data.get('joined_at', '—')[:10]}`"
         )
