@@ -497,10 +497,20 @@ def handle_callback(callback):
     answer_callback(cb_id)
 
     if data == "stats_me":
+
+        user_data = user_memory.get(uid, {})
+
+        text = (
+            "📊 *إحصائياتك*\n\n"
+            f"🧠 الرسائل المحفوظة: `{len(user_data.get('history', [])) - 1}`\n"
+            f"📨 عدد رسائلك: `{user_data.get('msg_count', 0)}`\n"
+            f"📅 تاريخ الانضمام: `{user_data.get('joined_at', '—')[:10]}`"
+        )
+
         edit_message(
             chat_id,
             message_id,
-            build_stats_text(uid),
+            text,
             back_button()
         )
         return
