@@ -32,7 +32,7 @@ BOT_USERNAME = os.getenv("BOT_USERNAME", "your_bot")
 # GROQ_API_KEY_1 , GROQ_API_KEY_2 , ... , GROQ_API_KEY_6
 GROQ_API_KEYS = [
     os.getenv(f"GROQ_API_KEY_{i}")
-    for i in range(1, 7)
+    for i in range(1, 101)
 ]
 GROQ_API_KEYS = [k for k in GROQ_API_KEYS if k]  # نزيل الفارغة
 if not GROQ_API_KEYS:
