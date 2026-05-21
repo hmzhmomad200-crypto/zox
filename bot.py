@@ -234,7 +234,7 @@ def ask_groq_fix(file_text, file_name):
             "Content-Type" : "application/json"
         }
         data = {
-            "model"      : "llama3-8b-8192",
+            "model"      : "llama-3.1-8b-instant",
             "messages"   : messages,
             "temperature": 0.2,
             "max_tokens" : 4096
@@ -364,7 +364,7 @@ def set_required_channel(channel):
 def ask_groq(messages):
     """يحاول كل المفاتيح عند 429 قبل الاستسلام"""
     data = {
-        "model"      : "llama3-8b-8192",
+        "model"      : "llama-3.1-8b-instant",
         "messages"   : messages,
         "temperature": 0.3,
         "max_tokens" : 2048
@@ -403,7 +403,7 @@ def ask_groq_vision(messages, image_b64):
         {"type": "image_url", "image_url": {"url": image_b64}}
     ]
     data = {
-        "model"      : "meta-llama/llama-4-maverick-17b-128e-instruct",
+        "model"      : "llama-3.2-90b-vision-preview",
         "messages"   : msgs,
         "temperature": 0.3,
         "max_tokens" : 2048
