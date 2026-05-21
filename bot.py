@@ -868,6 +868,9 @@ def _do_group_broadcast(admin_id, msg_text):
 # ══════════════════════════════════════
 offset = 0
 log.info("🚀 البوت يعمل...")
+log.info(f"🔑 عدد مفاتيح Groq المحملة: {len(GROQ_API_KEYS)}")
+for _i, _k in enumerate(GROQ_API_KEYS):
+    log.info(f"   مفتاح #{_i+1}: {_k[:8]}...")
 
 while True:
     try:
